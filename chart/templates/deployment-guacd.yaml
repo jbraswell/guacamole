@@ -1,0 +1,28 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: guacd
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: guacd
+  template:
+    metadata:
+      labels:
+        app: guacd
+    spec:
+      containers:
+        - name: guacd
+          image: {{ .Values.guacd.image.registry }}/{{ .Values.guacd.image.repository }}:{{ .Values.guacd.image.tag }}
+          ports:
+            - name: guacd
+              protocol: TCP
+              containerPort: 4822
+          volumeMounts:
+            - name: shared
+              mountPath: /shared
+      volumes:
+        - name: shared
+          persistentVolumeClaim:
+            claimName: guacd-shared

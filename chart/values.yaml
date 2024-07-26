@@ -1,0 +1,27 @@
+hostname:
+
+guacd:
+  image:
+    registry: docker.io
+    repository: guacamole/guacd
+    tag: "1.5.5"
+
+guacamole:
+  image:
+    registry: docker.io
+    repository: guacamole/guacamole
+    tag: "1.5.5"
+
+postgresql:
+  database:
+  hostname:
+  user:
+  password:
+
+oidc:
+  authorizationEndpoint:
+  jwksEndpoint:
+  issuer:
+  clientId:
+  redirectUri:
+  usernameClaimType:
