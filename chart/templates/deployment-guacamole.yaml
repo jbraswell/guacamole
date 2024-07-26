@@ -1,0 +1,106 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: guacamole
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: guacamole
+  template:
+    metadata:
+      labels:
+        app: guacamole
+    spec:
+      initContainers:
+        # TODO this initdb script should be baked into our custom guacamole image
+        - name: generate-initdb-script
+          image: {{ .Values.guacamole.image.registry }}/{{ .Values.guacamole.image.repository }}:{{ .Values.guacamole.image.tag }}
+          command: ["/bin/sh", "-c"]
+          args:
+            - "/opt/guacamole/bin/initdb.sh --postgresql > /initdb/initdb.sql"
+          volumeMounts:
+            - name: initdb
+              mountPath: /initdb
+        - name: run-initdb-script
+          image: docker.io/postgres:14.12
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              export PGPASSWORD={{ .Values.postgresql.password }} &&
+              if psql -h {{ .Values.postgresql.hostname }} -U {{ .Values.postgresql.user }} -d {{ .Values.postgresql.database }} -p {{ .Values.postgresql.port }} -c "\dt" | grep -q guacamole_connection; then
+                echo "Table exists, skipping initdb script.";
+              else
+                psql -h {{ .Values.postgresql.hostname }} -U {{ .Values.postgresql.user }} -d {{ .Values.postgresql.database }} -p {{ .Values.postgresql.port }}  -f /initdb/initdb.sql;
+              fi
+          volumeMounts:
+            - name: initdb
+              mountPath: /initdb
+        - name: download-extensions
+          image: {{ .Values.guacamole.image.registry }}/{{ .Values.guacamole.image.repository }}:{{ .Values.guacamole.image.tag }}
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -e
+              cd /tmp
+              wget https://dlcdn.apache.org/guacamole/{{ .Values.guacamole.image.tag }}/binary/guacamole-auth-sso-{{ .Values.guacamole.image.tag }}.tar.gz
+              tar zxvf guacamole-auth-sso-{{ .Values.guacamole.image.tag }}.tar.gz
+              mv guacamole-auth-sso-{{ .Values.guacamole.image.tag }}/openid/guacamole-auth-sso-openid-1.5.5.jar /etc/guacamole/extensions
+              rm -f guacamole-auth-sso-{{ .Values.guacamole.image.tag }}.tar.gz
+              rm -rf guacamole-auth-sso-{{ .Values.guacamole.image.tag }}
+          volumeMounts:
+            - name: extensions
+              mountPath: /etc/guacamole/extensions
+      containers:
+        - name: guacamole
+          image: {{ .Values.guacamole.image.registry }}/{{ .Values.guacamole.image.repository }}:{{ .Values.guacamole.image.tag }}
+          env:
+            # change priority to "openid" to hide login form and force redirect to keycloak
+            - name: EXTENSION_PRIORITY
+              value: postgresql
+            - name: OPENID_AUTHORIZATION_ENDPOINT
+              value: {{ .Values.oidc.authorizationEndpoint }}
+            - name: OPENID_JWKS_ENDPOINT
+              value: {{ .Values.oidc.jwksEndpoint }}
+            - name: OPENID_ISSUER
+              value: {{ .Values.oidc.issuer }}
+            - name: OPENID_CLIENT_ID
+              value: {{ .Values.oidc.clientId }}
+            - name: OPENID_REDIRECT_URI
+              value: {{ .Values.oidc.redirectUri }}
+            - name: OPENID_USERNAME_CLAIM_TYPE
+              value: {{ .Values.oidc.usernameClaimType }}
+            - name: POSTGRESQL_DATABASE
+              value: {{ .Values.postgresql.database }}
+            - name: POSTGRESQL_HOSTNAME
+              value: {{ .Values.postgresql.hostname }}
+            - name: POSTGRESQL_USER
+              value: {{ .Values.postgresql.user }}
+            - name: POSTGRESQL_PASSWORD
+              value: {{ .Values.postgresql.password }}
+            - name: POSTGRESQL_PORT
+              value: {{ .Values.postgresql.port | quote }}
+            - name: POSTGRESQL_AUTO_CREATE_ACCOUNTS
+              value: "true"
+            - name: GUACAMOLE_HOME
+              value: /etc/guacamole
+            - name: GUACD_HOSTNAME
+              value: guacd
+            - name: GUACD_PORT
+              value: "4822"
+            - name: WEBAPP_CONTEXT
+              value: ROOT
+          ports:
+            - name: http
+              protocol: TCP
+              containerPort: 8080
+          volumeMounts:
+            - name: extensions
+              mountPath: /etc/guacamole/extensions
+      volumes:
+        - name: initdb
+          persistentVolumeClaim:
+            claimName: guacamole-initdb
+        - name: extensions
+          persistentVolumeClaim:
+            claimName: guacamole-extensions
